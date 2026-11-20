@@ -68,6 +68,10 @@ def _coerce_structured_payload(payload: dict, output_schema: type[T]) -> dict:
     """Normalize common JSON shorthand while retaining strict Pydantic validation."""
     if output_schema.__name__ == "BatchAssessmentPayload":
         from .schemas import CriterionAssessmentPayload
+        if isinstance(payload, list):
+            payload = {"criteria": payload}
+        if not isinstance(payload, dict):
+            raise ValueError("batch structured output must be a JSON object or criteria array")
         result = dict(payload)
         normalized = []
         for item in result.get("criteria", []):
@@ -161,6 +165,92 @@ class EmbeddingProvider(Protocol):
 
 class LLMProvider(Protocol):
     def generate_structured(self, prompt: str, output_schema: type[T]) -> T: ...
+
+
+class FailoverLLMProvider:
+    """Try configured real providers in order; never substitutes heuristics."""
+
+    batch_mode = True
+
+    def __init__(self, providers: list):
+        if not providers:
+            raise ValueError("provider failover chain is empty")
+        self.providers = providers
+        self.provider_name = "failover"
+        self.selected_provider = None
+        self.model = None
+        self.attempted_providers = []
+        self.failover_used = False
+        self.failure_reasons = []
+        self.structured_call_count = 0
+
+    def generate_structured(self, prompt: str, output_schema: type[T]) -> T:
+        self.structured_call_count += 1
+        for index, provider in enumerate(self.providers):
+            name = getattr(provider, "provider_name", provider.__class__.__name__.lower())
+            self.attempted_providers.append(name)
+            try:
+                result = provider.generate_structured(prompt, output_schema)
+                self.selected_provider = name
+                self.model = getattr(provider, "model", None)
+                self.failover_used = index > 0
+                return result
+            except Exception as exc:
+                self.failure_reasons.append(f"{name}: {str(exc)[:300]}")
+        raise RuntimeError("all configured LLM providers failed: " + " | ".join(self.failure_reasons))
+
+    def verify_credentials(self) -> dict:
+        checks = []
+        for provider in self.providers:
+            verifier = getattr(provider, "verify_credentials", None)
+            if verifier is None:
+                checks.append({"provider": getattr(provider, "provider_name", "unknown"), "ok": True, "message": "credential verification is not supported"})
+            else:
+                checks.append(verifier())
+        return {
+            "provider": "failover",
+            "ok": any(item.get("ok") for item in checks),
+            "providers": checks,
+            "configured_order": [getattr(provider, "provider_name", "unknown") for provider in self.providers],
+        }
+
+
+def _build_provider(provider_name: str):
+    name = provider_name.strip().lower()
+    if name in {"openai", "openai-compatible"}:
+        return OpenAICompatibleProvider(provider_name="openai")
+    if name == "groq":
+        return OpenAICompatibleProvider(provider_name="groq", credential_source="dotenv" if os.getenv("GROQ_API_KEY") else "missing")
+    if name in {"gemini", "google"}:
+        return GeminiProvider()
+    if name in {"bedrock", "aws-bedrock"}:
+        return BedrockProvider()
+    raise ValueError(f"unsupported provider in chain: {provider_name}")
+
+
+def get_llm_provider_chain():
+    _load_local_env()
+    configured = os.getenv("LLM_PROVIDER_CHAIN") or os.getenv("LLM_PROVIDER", "mock")
+    names = [item.strip() for item in configured.split(",") if item.strip()]
+    if names == ["mock"]:
+        return MockLLMProvider()
+    providers = []
+    unavailable = []
+    for name in names:
+        try:
+            providers.append(_build_provider(name))
+        except Exception as exc:
+            unavailable.append(f"{name}: {exc}")
+    if not providers:
+        if len(names) == 1:
+            detail = unavailable[0].split(": ", 1)[1] if unavailable else "provider unavailable"
+            if "required" in detail:
+                raise ValueError(detail)
+            raise ValueError("unsupported LLM_PROVIDER: " + names[0] + "; use mock, openai, groq, gemini, or bedrock")
+        raise ValueError("no usable provider in LLM_PROVIDER_CHAIN; " + " | ".join(unavailable))
+    if unavailable:
+        print("[provider-chain] unavailable providers skipped: " + " | ".join(unavailable))
+    return providers[0] if len(providers) == 1 else FailoverLLMProvider(providers)
 
 
 class MockEmbeddingProvider:
@@ -270,8 +360,9 @@ class OpenAICompatibleProvider:
 
 class GeminiProvider:
     def __init__(self, api_key: str | None = None, model: str | None = None):
+        self.provider_name = "gemini"
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        self.model = model or os.getenv("LLM_MODEL", "gemini-3.8-flash")
+        self.model = model or os.getenv("GEMINI_MODEL") or (os.getenv("LLM_MODEL") if os.getenv("LLM_PROVIDER", "").lower() in {"gemini", "google"} else None) or "gemini-3.8-flash"
         self.structured_call_count = 0
         self.batch_mode = True
         self.cache = DiskCache()
@@ -311,6 +402,13 @@ class GeminiProvider:
                     time.sleep(retry_seconds)
                     continue
                 raise RuntimeError(f"Gemini request rejected with HTTP {exc.code}: {detail}") from exc
+            except (TimeoutError, urllib.error.URLError) as exc:
+                if attempt < 4:
+                    retry_seconds = min(30.0, 2.0 * (2 ** attempt))
+                    print(f"[gemini] transient network error: waiting {retry_seconds:.1f}s before retry {attempt + 1}/5...")
+                    time.sleep(retry_seconds)
+                    continue
+                raise RuntimeError(f"Gemini structured request failed after transient network retries: {exc}") from exc
             except Exception as exc:
                 raise RuntimeError(f"Gemini structured request failed: {exc}") from exc
         raise RuntimeError("Gemini request failed after rate-limit retries")
@@ -334,6 +432,7 @@ class GeminiProvider:
 
 class BedrockProvider:
     def __init__(self, model: str | None = None, region: str | None = None):
+        self.provider_name = "bedrock"
         self.model = model or os.getenv("BEDROCK_MODEL_ID", "amazon.nova-lite-v1:0")
         self.region = region or os.getenv("AWS_REGION", "us-east-1")
         self.structured_call_count = 0
@@ -355,6 +454,10 @@ class BedrockProvider:
 
 
 def get_llm_provider():
+    return get_llm_provider_chain()
+
+
+def _get_llm_provider_legacy():
     groq_key_preexisting = "GROQ_API_KEY" in os.environ
     loaded = _load_local_env()
     provider = os.getenv("LLM_PROVIDER", "mock").lower()

@@ -106,6 +106,9 @@ class AssessmentRun(BaseModel):
     latency_ms: int = Field(ge=0)
     embedding_model: str | None = None
     retrieval_mode: Literal["lexical", "semantic", "hybrid"] = "lexical"
+    evidence_mode: Literal["lexical", "semantic", "hybrid"] = "lexical"
+    provider_chain: list[str] = Field(default_factory=list)
+    provider_failover_used: bool = False
     index_version: str | None = None
 
 

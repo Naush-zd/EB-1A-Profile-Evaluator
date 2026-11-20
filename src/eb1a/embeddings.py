@@ -1,6 +1,5 @@
 """Provider interface and Sentence Transformers implementation."""
 from abc import ABC, abstractmethod
-from functools import lru_cache
 
 
 class EmbeddingProvider(ABC):
@@ -12,23 +11,32 @@ class EmbeddingProvider(ABC):
         raise NotImplementedError
 
 
-@lru_cache(maxsize=4)
-def _load_model(model_name: str):
+_MODEL_CACHE = {}
+
+
+def _load_model(model_name: str, local_files_only: bool = False):
+    if model_name in _MODEL_CACHE:
+        return _MODEL_CACHE[model_name]
     try:
         from sentence_transformers import SentenceTransformer
     except ImportError as exc:
         raise RuntimeError("Install semantic retrieval with: python -m pip install -e .[embeddings]") from exc
     try:
-        return SentenceTransformer(model_name)
+        model = SentenceTransformer(model_name, local_files_only=local_files_only)
     except Exception as exc:
         raise RuntimeError(f"embedding model '{model_name}' could not be loaded: {exc}") from exc
+    _MODEL_CACHE[model_name] = model
+    return model
 
 
 class SentenceTransformerEmbeddingProvider(EmbeddingProvider):
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         self.model_name = model_name
         self._model = _load_model(model_name)
-        self.dimension = int(self._model.get_sentence_embedding_dimension())
+        dimension_method = getattr(self._model, "get_embedding_dimension", None)
+        if dimension_method is None:
+            dimension_method = self._model.get_sentence_embedding_dimension
+        self.dimension = int(dimension_method())
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:

@@ -12,6 +12,7 @@ from .knowledge_base import build_knowledge_base, inspect_knowledge_base
 from .providers import get_llm_provider, _load_local_env
 from .vector import hybrid_search, semantic_search, hash_vector_search, indexed_semantic_search
 from .service import assess_with_fallback
+from .opportunities import TavilySearchProvider, suggest_opportunities
 
 
 def main() -> int:
@@ -51,9 +52,10 @@ def main() -> int:
     assess.add_argument("profile", type=Path)
     assess.add_argument("--corpus", type=Path, required=True)
     assess.add_argument("--out", type=Path, default=Path("assessment.json"))
-    assess.add_argument("--fast", action="store_true", help="Skip LLM calls for criteria with no candidate evidence keywords")
+    assess.add_argument("--fast", action="store_true", help="Skip LLM calls for criteria with no candidate evidence spans")
     assess.add_argument("--index", type=Path)
     assess.add_argument("--retrieval-mode", choices=["lexical", "semantic", "hybrid"], default="hybrid")
+    assess.add_argument("--evidence-mode", choices=["lexical", "semantic", "hybrid"], default=os.getenv("EB1A_EVIDENCE_MODE", "lexical"))
     assess.add_argument("--mode", choices=["production", "test_mock"], default="production")
     inspect = sub.add_parser("inspect-corpus")
     inspect.add_argument("corpus", type=Path)
@@ -61,11 +63,17 @@ def main() -> int:
     evaluation.add_argument("dataset", type=Path)
     evaluation.add_argument("--corpus", type=Path, required=True)
     evaluation.add_argument("--out", type=Path)
-    evaluation.add_argument("--fast", action="store_true", help="Skip LLM calls for criteria with no candidate evidence keywords")
+    evaluation.add_argument("--fast", action="store_true", help="Skip LLM calls for criteria with no candidate evidence spans")
     evaluation.add_argument("--index", type=Path, default=Path("data/processed/embeddings.json"))
     evaluation.add_argument("--retrieval-mode", choices=["lexical", "semantic", "hybrid"], default="hybrid")
+    evaluation.add_argument("--evidence-mode", choices=["lexical", "semantic", "hybrid"], default=os.getenv("EB1A_EVIDENCE_MODE", "lexical"))
     evaluation.add_argument("--reranker-model", default=None, help="Optional cross-encoder model for retrieval benchmarking")
     verify = sub.add_parser("verify-provider")
+    opportunities = sub.add_parser("opportunities")
+    opportunities.add_argument("assessment", type=Path)
+    opportunities.add_argument("--field", required=True)
+    opportunities.add_argument("--out", type=Path, default=Path("opportunities.json"))
+    opportunities.add_argument("--max-criteria", type=int, default=2)
     args = parser.parse_args()
     if args.command == "ingest-profile":
         document = load_profile(args.profile)
@@ -109,7 +117,7 @@ def main() -> int:
         index_path = args.index or args.corpus.with_name("embeddings.json")
         if args.mode == "production" and provider is None:
             raise SystemExit("production assessment requires a real LLM provider; configure LLM_PROVIDER and its credentials, or explicitly use --mode test_mock")
-        assessment = assess_with_fallback(profile, chunks, provider=provider, skip_empty_evidence=args.fast, allow_heuristic_fallback=args.mode == "test_mock", index_path=index_path, retrieval_mode="lexical" if args.mode == "test_mock" else args.retrieval_mode)
+        assessment = assess_with_fallback(profile, chunks, provider=provider, skip_empty_evidence=args.fast, allow_heuristic_fallback=args.mode == "test_mock", index_path=index_path, retrieval_mode="lexical" if args.mode == "test_mock" else args.retrieval_mode, evidence_mode=args.evidence_mode)
         errors = validate_grounding(assessment, profile, chunks)
         if errors:
             print(json.dumps({"errors": errors}, indent=2))
@@ -123,7 +131,7 @@ def main() -> int:
     elif args.command == "eval":
         if args.reranker_model:
             os.environ["RERANKER_MODEL"] = args.reranker_model
-        result = run_evaluation(args.dataset, args.corpus, fast=args.fast, index_path=args.index, retrieval_mode=args.retrieval_mode)
+        result = run_evaluation(args.dataset, args.corpus, fast=args.fast, index_path=args.index, retrieval_mode=args.retrieval_mode, evidence_mode=args.evidence_mode)
         rendered = json.dumps(result, indent=2)
         if args.out:
             args.out.write_text(rendered, encoding="utf-8")
@@ -136,6 +144,13 @@ def main() -> int:
             print(json.dumps({"provider": os.getenv("LLM_PROVIDER", "mock"), "ok": True, "message": "offline provider requires no credentials"}, indent=2))
         else:
             print(json.dumps(provider.verify_credentials(), indent=2))
+    elif args.command == "opportunities":
+        _load_local_env()
+        assessment = json.loads(args.assessment.read_text(encoding="utf-8"))
+        from .schemas import Assessment
+        result = suggest_opportunities(Assessment.model_validate(assessment), args.field, TavilySearchProvider(), max_criteria=args.max_criteria)
+        args.out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        print(f"Wrote {args.out}")
     return 0
 
 

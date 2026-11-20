@@ -62,6 +62,7 @@ tests/              # unit and contract tests
 - **Versioned corpus**: store source URL, retrieval date, content hash, and policy revision.
 - **Local semantic retrieval**: Sentence Transformers with a swappable embedding model.
 - **Optional neural reranking**: A Sentence Transformers cross-encoder can rerank the hybrid top-k candidates when `RERANKER_MODEL` is configured.
+- **Evidence extraction modes**: Candidate profile spans can be found with transparent lexical matching, Sentence Transformer semantic matching, or their hybrid union. The selected mode is recorded in assessment metadata.
 
 Install semantic retrieval with `python -m pip install -e ".[embeddings]"`. The default model is `all-MiniLM-L6-v2`; the first semantic query downloads it into the local model cache. Production retrieval requires the real embedding model and persistent index. Use `--hash-baseline` only for isolated regression tests.
 
@@ -74,7 +75,17 @@ The first milestone is a deterministic CLI that accepts `.txt` and `.pdf`, emits
 ```powershell
 python -m eb1a assess data/eval/profile_awards.txt --corpus data/processed/uscis_chunks.jsonl --index data/processed/embeddings.json --retrieval-mode hybrid --out assessment.json
 python -m eb1a eval data/eval --corpus data/processed/uscis_chunks.jsonl --index data/processed/embeddings.json --retrieval-mode hybrid --fast --out data/processed/evaluation.json
+# Use semantic profile-span extraction to catch paraphrases in fast mode:
+python -m eb1a assess data/eval/profile_artist.txt --corpus data/processed/uscis_chunks.jsonl --index data/processed/embeddings.json --retrieval-mode hybrid --evidence-mode semantic --fast --out assessment_semantic_evidence.json
 ```
+
+Optional public-opportunity discovery requires `TAVILY_API_KEY` and never sends the uploaded profile to search. It uses only the declared field and the weakest criterion names:
+
+```powershell
+python -m eb1a opportunities data/processed/assessment.json --field "machine learning" --out data/processed/opportunities.json
+```
+
+Returned items are source-linked leads only; they are not evidence of eligibility or accomplishments.
 
 ## Run locally
 
@@ -96,6 +107,8 @@ To use a hosted provider, configure the environment before running `assess`:
 $env:LLM_PROVIDER = "groq" # openai, groq, gemini, or bedrock
 $env:GROQ_API_KEY = "..."   # use the matching provider variable
 $env:LLM_MODEL = "openai/gpt-oss-20b" # active Groq model; use the provider's verified model list
+# Optional explicit provider failover order:
+# $env:LLM_PROVIDER_CHAIN = "groq,gemini,openai"
 python -m eb1a assess data/eval/profile_researcher.txt --corpus data/processed/uscis_chunks.jsonl --out assessment.json
 ```
 
@@ -122,6 +135,7 @@ Free-tier providers (especially Groq) impose strict limits:
 - **Fast Mode (`--fast`)**: Skips making LLM calls for criteria that have zero candidate evidence keywords in the resume (automatically sets `insufficient_info`), reducing LLM calls by 70%.
 - **Clean Ingestion**: HTML navbars and scripts are stripped during ingestion, cutting prompt token consumption by 60%.
 - **Model Choice**: Use active Groq models like `openai/gpt-oss-20b` or `openai/gpt-oss-120b`, or `gemini-2.0-flash` on Google Gemini for high throughput and lower rate-limit friction.
+- **Provider failover**: Set `LLM_PROVIDER_CHAIN=groq,gemini,openai` to try configured real providers in order. The selected provider, attempted providers, and failover status are recorded in run metadata. Production never falls through to heuristic output.
 
 ## LLM providers
 
@@ -169,6 +183,7 @@ The deterministic hashing vector search is an offline regression baseline, not a
 
 - **Better retrieval:** BM25 plus Sentence Transformer hybrid retrieval, with an optional cross-encoder reranker and before/after retrieval metrics.
 - **Guardrails:** uploaded prompt-injection text is flagged as data, not instructions; malformed, empty, garbled, and scanned inputs fail explicitly.
+- **Agentic opportunities:** optional Tavily-backed public opportunity discovery for weak criteria, with privacy-preserving queries and source-linked lead output.
 
 ### Failure Analysis
 
@@ -180,6 +195,8 @@ The failure modes below are properties of the pipeline design and hold regardles
 
 2. **Keyword-gated evidence extraction misses paraphrase**: `_profile_evidence` matches a fixed keyword list per criterion (`evaluate.py`). A resume that describes a judging role as "served on the technical program committee" without the token `judge`/`reviewer` yields no evidence span, so in fast mode the criterion is forced to `insufficient_info` and never reaches the LLM. This trades recall for cost and is the most likely source of false `insufficient_info` ratings.
 
+   Semantic or hybrid evidence mode addresses this specific failure mode by matching profile sentences to criterion queries with the configured Sentence Transformer. The default similarity threshold is `0.35` and can be tuned with `EB1A_EVIDENCE_SIMILARITY_THRESHOLD`; it remains opt-in until a dedicated evidence-span recall benchmark establishes a safe threshold.
+
 3. **Single-token false positives**: Some keyword lists are broad (`performing` for commercial success, `member` for membership). A line like "performing routine maintenance" can surface a spurious evidence span, which the heuristic path then rates `partial`. The LLM path is more robust because it sees the retrieved USCIS definition, but the evidence span still appears in the output.
 
 4. **`partial` vs `strong` boundary is subjective**: The prompt instructs the model to reserve `strong` for multiple corroborating or independently verifiable facts and rate a single unverified assertion as `partial`. Disagreements with gold labels cluster on this boundary, because the distinction depends on judgments about stature and verifiability that a single resume line rarely settles.
@@ -190,6 +207,6 @@ The failure modes below are properties of the pipeline design and hold regardles
 
 
 ### Future Improvements
-1. **Dynamic Web Search Tool (Agentic Bonus)**: Suggesting relevant open calls, conferences, and judging panels for candidate gaps.
-2. **Re-ranking**: Add a cross-encoder after the BM25 plus Sentence Transformer baseline, then report before/after retrieval metrics.
-3. **Independent LLM-as-Judge**: Add a separate judge run only after the labeled benchmark and citation-review protocol are stable.
+1. **Independent LLM-as-Judge**: Add a separate judge run only after the labeled benchmark and citation-review protocol are stable.
+2. **Provider comparison**: Compare Groq, Gemini, OpenAI-compatible, and Bedrock runs for quality, latency, cost, and rate-limit behavior.
+3. **Evidence-span benchmark**: Add independently reviewed sentence-level evidence labels to tune semantic extraction thresholds.

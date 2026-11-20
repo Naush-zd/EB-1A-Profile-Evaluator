@@ -2,9 +2,9 @@
 import hashlib
 import math
 import re
-from functools import lru_cache
 from .schemas import RetrievalResult, SourceChunk
 from .embedding_index import read_embedding_index
+from .embeddings import _load_model
 
 def hash_embed(text: str, dimensions: int = 128) -> list[float]:
     vector = [0.0] * dimensions
@@ -24,16 +24,8 @@ def hash_vector_search(chunks, query, top_k=5):
     results = [RetrievalResult(chunk=c, score=cosine(q, hash_embed(c.text)), matched_terms=[]) for c in chunks]
     return sorted((r for r in results if r.score > 0), key=lambda r: (-r.score, r.chunk.chunk_id))[:top_k]
 
-@lru_cache(maxsize=8)
 def _sentence_model(model_name: str, local_files_only: bool = False):
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError as exc:
-        raise RuntimeError("Semantic retrieval requires sentence-transformers. Install with: python -m pip install -e .[embeddings]") from exc
-    try:
-        return SentenceTransformer(model_name, local_files_only=local_files_only)
-    except Exception as exc:
-        raise RuntimeError(f"Could not load embedding model '{model_name}': {exc}") from exc
+    return _load_model(model_name, local_files_only=local_files_only)
 
 def semantic_search(chunks, query, top_k=5, model_name="all-MiniLM-L6-v2", *, allow_download=True):
     if not chunks or not query.strip():

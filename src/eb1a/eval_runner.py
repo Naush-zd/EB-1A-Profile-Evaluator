@@ -14,7 +14,7 @@ from .providers import get_llm_provider, _load_local_env
 from .metrics import retrieval_benchmark
 
 
-def run_evaluation(dataset: str | Path, corpus: str | Path, fast: bool = False, index_path: str | Path | None = None, retrieval_mode: str = "hybrid") -> dict:
+def run_evaluation(dataset: str | Path, corpus: str | Path, fast: bool = False, index_path: str | Path | None = None, retrieval_mode: str = "hybrid", evidence_mode: str | None = None) -> dict:
     chunks = read_jsonl(corpus)
     _load_local_env()
     provider = None if os.getenv("LLM_PROVIDER", "mock").lower() == "mock" else get_llm_provider()
@@ -41,7 +41,7 @@ def run_evaluation(dataset: str | Path, corpus: str | Path, fast: bool = False, 
         if "injection" in case["profile_id"] or profile.suspicious_instructions:
             injection_cases += 1
             injection_detected += int(bool(profile.suspicious_instructions))
-        assessment = assess_with_fallback(profile, chunks, provider=provider, skip_empty_evidence=fast, allow_heuristic_fallback=provider is None, index_path=index_path, retrieval_mode="lexical" if provider is None else retrieval_mode)
+        assessment = assess_with_fallback(profile, chunks, provider=provider, skip_empty_evidence=fast, allow_heuristic_fallback=provider is None, index_path=index_path, retrieval_mode="lexical" if provider is None else retrieval_mode, evidence_mode=evidence_mode)
         if assessment.run:
             total_llm_calls += assessment.run.llm_calls
             fallback_count += int(assessment.run.fallback_used)
@@ -105,7 +105,7 @@ def run_evaluation(dataset: str | Path, corpus: str | Path, fast: bool = False, 
         "run_id": uuid.uuid4().hex,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "corpus_version": chunks[0].corpus_version if chunks else "empty",
-        "provider": getattr(provider, "provider_name", "mock") if provider is not None else "mock",
+        "provider": getattr(provider, "selected_provider", None) or (getattr(provider, "provider_name", "mock") if provider is not None else "mock"),
         "model": getattr(provider, "model", None) if provider is not None else None,
         "prompt_version": PROMPT_VERSION,
         "fast_mode": fast,
@@ -113,6 +113,9 @@ def run_evaluation(dataset: str | Path, corpus: str | Path, fast: bool = False, 
         "embedding_model": os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2") if retrieval_mode != "lexical" else None,
         "reranker_model": os.getenv("RERANKER_MODEL") or None,
         "retrieval_mode": retrieval_mode,
+        "evidence_mode": evidence_mode or os.getenv("EB1A_EVIDENCE_MODE", "lexical"),
+        "provider_chain": getattr(provider, "attempted_providers", []) if provider is not None else [],
+        "provider_failover_used": bool(getattr(provider, "failover_used", False)),
         "index_version": index_version,
         "index_path": str(Path(index_path).resolve()) if index_path else None,
         "authoritative": (fallback_count == 0 and provider is not None

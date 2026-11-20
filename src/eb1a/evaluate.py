@@ -3,6 +3,7 @@ from .schemas import Assessment, AssessmentRun, BatchAssessmentPayload, Criterio
 from .retrieve import search
 from .vector import indexed_hybrid_search, indexed_semantic_search
 from .prompts import build_criterion_prompt
+from .evidence import extract_profile_evidence
 from .batch import build_batch_prompt
 import os
 import time
@@ -54,24 +55,22 @@ KEYWORDS = {
 }
 
 
-def _profile_evidence(profile: ProfileDocument, criterion: CriterionId) -> list[EvidenceSpan]:
-    terms = KEYWORDS[criterion]
-    spans = []
-    for index, line in enumerate(profile.content.splitlines()):
-        lowered = line.lower()
-        has_negative_context = any(marker in lowered for marker in ("no documented", "no evidence", "without evidence", "not documented", "none provided", "does not have"))
-        if any(term in lowered for term in terms) and not has_negative_context:
-            spans.append(EvidenceSpan(span_id=f"{profile.profile_id}-line-{index}", quote=line.strip()))
-    return spans
+def _profile_evidence(profile: ProfileDocument, criterion: CriterionId, evidence_mode: str = "lexical", evidence_provider=None) -> list[EvidenceSpan]:
+    return extract_profile_evidence(profile, criterion, KEYWORDS, evidence_mode, evidence_provider)
 
 
-def assess_profile(profile: ProfileDocument, chunks: list[SourceChunk], corpus_version: str = "unknown", provider=None, skip_empty_evidence: bool | None = None, retrieval_mode: str | None = None, index_path=None) -> Assessment:
+def assess_profile(profile: ProfileDocument, chunks: list[SourceChunk], corpus_version: str = "unknown", provider=None, skip_empty_evidence: bool | None = None, retrieval_mode: str | None = None, index_path=None, evidence_mode: str | None = None) -> Assessment:
     if skip_empty_evidence is None:
         skip_empty_evidence = os.getenv("EB1A_SKIP_EMPTY_EVIDENCE", "0") == "1"
     assessments = []
     retrieval_mode = retrieval_mode or "lexical"
     embedding_model = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
     reranker_model = os.getenv("RERANKER_MODEL") or None
+    evidence_mode = evidence_mode or os.getenv("EB1A_EVIDENCE_MODE", "lexical")
+    evidence_provider = None
+    if evidence_mode in {"semantic", "hybrid"}:
+        from .embeddings import SentenceTransformerEmbeddingProvider
+        evidence_provider = SentenceTransformerEmbeddingProvider(embedding_model)
     def retrieve(query):
         if retrieval_mode == "hybrid":
             if not index_path:
@@ -83,9 +82,9 @@ def assess_profile(profile: ProfileDocument, chunks: list[SourceChunk], corpus_v
             return indexed_semantic_search(chunks, query, index_path, top_k=3, model_name=embedding_model)
         return search(chunks, query, top_k=3)
     if provider is not None and getattr(provider, "batch_mode", False):
-        return assess_profile_batch(profile, chunks, corpus_version, provider, skip_empty_evidence, retrieval_mode, index_path)
+        return assess_profile_batch(profile, chunks, corpus_version, provider, skip_empty_evidence, retrieval_mode, index_path, evidence_mode, evidence_provider)
     for index, (criterion, description) in enumerate(CRITERIA.items()):
-        evidence = _profile_evidence(profile, criterion)
+        evidence = _profile_evidence(profile, criterion, evidence_mode, evidence_provider)
         query = f"{criterion.value.replace('_', ' ')} {description}"
         retrieved = retrieve(query)
         citations = [SourceCitation(chunk_id=r.chunk.chunk_id, source_url=r.chunk.source_url, locator=r.chunk.locator, quote=r.chunk.text[:500]) for r in retrieved]
@@ -144,8 +143,8 @@ def assess_profile(profile: ProfileDocument, chunks: list[SourceChunk], corpus_v
     return _build_overall(profile.profile_id, corpus_version, assessments)
 
 
-def assess_profile_batch(profile, chunks, corpus_version, provider, skip_empty_evidence=False, retrieval_mode="lexical", index_path=None):
-    evidence_by = {criterion: _profile_evidence(profile, criterion) for criterion in CRITERIA}
+def assess_profile_batch(profile, chunks, corpus_version, provider, skip_empty_evidence=False, retrieval_mode="lexical", index_path=None, evidence_mode="lexical", evidence_provider=None):
+    evidence_by = {criterion: _profile_evidence(profile, criterion, evidence_mode, evidence_provider) for criterion in CRITERIA}
     active_criteria = [criterion for criterion, evidence in evidence_by.items() if evidence] if skip_empty_evidence else list(CRITERIA)
     if not active_criteria:
         return assess_profile(profile, chunks, corpus_version, provider=None, skip_empty_evidence=True)
