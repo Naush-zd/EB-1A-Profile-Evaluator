@@ -24,6 +24,13 @@ PDF/TXT profile
     -> JSON / CLI / API / Streamlit UI
 ```
 
+### RAG implementation details
+
+- **Chunking:** USCIS HTML/text is cleaned of navigation, scripts, and boilerplate, then split at chapter, section, criterion, initial-evidence, and final-merits headings. Chunks target approximately 700 words with 100-word overlap when a section is longer. Each JSONL chunk stores its heading, section, source URL, locator, retrieval timestamp, corpus version, and content hash.
+- **Embeddings:** USCIS chunks use the configurable Sentence Transformer model `all-MiniLM-L6-v2` by default. Vectors are written to a persistent, content-hash- and corpus-version-checked index at `data/processed/embeddings.json`; the model is loaded once per process and query vectors are generated at search time.
+- **Retrieval:** BM25-style lexical retrieval and cosine semantic retrieval run independently. Hybrid retrieval combines their ranked results and can optionally apply a cross-encoder reranker. Hash vectors are retained only as an explicitly named offline regression baseline.
+- **Prompts:** Each criterion prompt contains the criterion definition, criterion-specific evidence requirements, exact profile evidence spans, and retrieved USCIS chunks. The provider must return structured JSON with a rating, exact evidence quotes, citations, reasoning, and next steps. Pydantic and post-generation validators reject unsupported evidence and citations.
+
 ## Repository layout
 
 ```text
@@ -52,7 +59,7 @@ tests/              # unit and contract tests
 7. Measure rating accuracy, citation validity, evidence grounding, and hallucinated-evidence rate.
 8. Expose the pipeline through CLI first, then add FastAPI or Streamlit.
 
-## Key decisions
+## Design decisions and trade-offs
 
 - **Pydantic JSON contract** over free-form prose.
 - **Stable chunk IDs and evidence span IDs** so every claim is auditable.
@@ -73,8 +80,11 @@ For the optional reranking bonus, set `RERANKER_MODEL=cross-encoder/ms-marco-Min
 The first milestone is a deterministic CLI that accepts `.txt` and `.pdf`, emits validated JSON, and runs without a UI:
 
 ```powershell
-python -m eb1a assess data/eval/profile_awards.txt --corpus data/processed/uscis_chunks.jsonl --index data/processed/embeddings.json --retrieval-mode hybrid --out assessment.json
-python -m eb1a eval data/eval --corpus data/processed/uscis_chunks.jsonl --index data/processed/embeddings.json --retrieval-mode hybrid --fast --out data/processed/evaluation.json
+python -m pip install -e ".[embeddings]"
+$env:PYTHONPATH = "src"
+python -m eb1a build-kb data/raw/uscis_volume6_partf_ch2.html --url "https://www.uscis.gov/policy-manual/volume-6-part-f-chapter-2" --out data/processed/uscis_chunks.jsonl --manifest data/processed/uscis_manifest.json --index data/processed/embeddings.json
+python -m eb1a assess data/eval/profile_awards.txt --corpus data/processed/uscis_chunks.jsonl --index data/processed/embeddings.json --retrieval-mode hybrid --evidence-mode hybrid --out assessment.json
+python -m eb1a eval data/eval --corpus data/processed/uscis_chunks.jsonl --index data/processed/embeddings.json --retrieval-mode hybrid --evidence-mode hybrid --fast --out data/processed/evaluation.json
 # Use semantic profile-span extraction to catch paraphrases in fast mode:
 python -m eb1a assess data/eval/profile_artist.txt --corpus data/processed/uscis_chunks.jsonl --index data/processed/embeddings.json --retrieval-mode hybrid --evidence-mode semantic --fast --out assessment_semantic_evidence.json
 ```
