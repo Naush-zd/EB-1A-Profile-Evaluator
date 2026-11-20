@@ -54,7 +54,6 @@ def retrieval_benchmark(chunks: list[SourceChunk], index_path, embedding_model: 
         "hybrid_bm25_sentence_transformer": retrieval_metrics(hybrid, gold_ids).__dict__,
     }
     if reranker_model:
-        from .vector import indexed_hybrid_search
         reranked = [indexed_hybrid_search(chunks, query, index_path, top_k=5, model_name=embedding_model, reranker_model=reranker_model) for _, query in queries]
         report["hybrid_with_cross_encoder"] = retrieval_metrics(reranked, gold_ids).__dict__
     return report
