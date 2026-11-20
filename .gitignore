@@ -1,0 +1,10 @@
+.env
+.test-tmp/
+.demo-tmp/
+.eb1a_cache/
+data/raw/
+data/processed/
+*.jsonl
+*.json
+__pycache__/
+.pytest_cache/

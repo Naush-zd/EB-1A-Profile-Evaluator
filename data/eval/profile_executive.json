@@ -1,0 +1,7 @@
+{
+  "profile_id": "executive",
+  "profile_file": "profile_executive.txt",
+  "gold": {
+    "awards": "insufficient_info", "membership": "insufficient_info", "published_material": "insufficient_info", "judging": "insufficient_info", "original_contributions": "insufficient_info", "scholarly_articles": "insufficient_info", "exhibitions": "insufficient_info", "leading_critical_role": "partial", "high_salary": "partial", "commercial_success": "insufficient_info"
+  }
+}

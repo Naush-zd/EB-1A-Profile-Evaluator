@@ -1,0 +1,7 @@
+{
+  "profile_id": "researcher",
+  "profile_file": "profile_researcher.txt",
+  "gold": {
+    "awards": "insufficient_info", "membership": "insufficient_info", "published_material": "insufficient_info", "judging": "insufficient_info", "original_contributions": "partial", "scholarly_articles": "strong", "exhibitions": "insufficient_info", "leading_critical_role": "insufficient_info", "high_salary": "insufficient_info", "commercial_success": "insufficient_info"
+  }
+}

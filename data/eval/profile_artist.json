@@ -1,0 +1,7 @@
+{
+  "profile_id": "artist",
+  "profile_file": "profile_artist.txt",
+  "gold": {
+    "awards": "insufficient_info", "membership": "insufficient_info", "published_material": "partial", "judging": "partial", "original_contributions": "insufficient_info", "scholarly_articles": "insufficient_info", "exhibitions": "strong", "leading_critical_role": "insufficient_info", "high_salary": "insufficient_info", "commercial_success": "strong"
+  }
+}

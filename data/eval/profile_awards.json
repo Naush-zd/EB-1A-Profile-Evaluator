@@ -1,0 +1,7 @@
+{
+  "profile_id": "awards",
+  "profile_file": "profile_awards.txt",
+  "gold": {
+    "awards": "partial", "membership": "insufficient_info", "published_material": "insufficient_info", "judging": "insufficient_info", "original_contributions": "insufficient_info", "scholarly_articles": "insufficient_info", "exhibitions": "insufficient_info", "leading_critical_role": "insufficient_info", "high_salary": "insufficient_info", "commercial_success": "insufficient_info"
+  }
+}

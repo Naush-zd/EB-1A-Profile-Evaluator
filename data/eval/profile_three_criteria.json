@@ -1,0 +1,8 @@
+{
+  "profile_id": "three_criteria",
+  "profile_file": "profile_three_criteria.txt",
+  "gold": {
+    "awards": "partial", "membership": "insufficient_info", "published_material": "insufficient_info", "judging": "partial", "original_contributions": "insufficient_info", "scholarly_articles": "insufficient_info", "exhibitions": "insufficient_info", "leading_critical_role": "partial", "high_salary": "insufficient_info", "commercial_success": "insufficient_info"
+  },
+  "notes": "Tests the initial-threshold signal without implying approval or legal sufficiency."
+}
