@@ -107,7 +107,7 @@ def run_evaluation(dataset: str | Path, corpus: str | Path, fast: bool = False, 
                           and getattr(provider, "provider_name", "mock") != "mock"),
     }
     if index_path and Path(index_path).exists() and retrieval_mode != "lexical":
-        summary["retrieval_benchmark"] = retrieval_benchmark(chunks, index_path, os.getenv("EMBEDDING_MODEL") or "all-MiniLM-L6-v2")
+        summary["retrieval_benchmark"] = retrieval_benchmark(chunks, index_path, os.getenv("EMBEDDING_MODEL") or "all-MiniLM-L6-v2", os.getenv("RERANKER_MODEL") or None)
     else:
         summary["retrieval_benchmark"] = {"status": "not_run", "reason": "semantic index not supplied"}
     return summary

@@ -64,6 +64,7 @@ def main() -> int:
     evaluation.add_argument("--fast", action="store_true", help="Skip LLM calls for criteria with no candidate evidence keywords")
     evaluation.add_argument("--index", type=Path, default=Path("data/processed/embeddings.json"))
     evaluation.add_argument("--retrieval-mode", choices=["lexical", "semantic", "hybrid"], default="hybrid")
+    evaluation.add_argument("--reranker-model", default=None, help="Optional cross-encoder model for retrieval benchmarking")
     verify = sub.add_parser("verify-provider")
     args = parser.parse_args()
     if args.command == "ingest-profile":
@@ -120,6 +121,8 @@ def main() -> int:
         print(json.dumps(report, indent=2))
         return 1 if report["validation_errors"] else 0
     elif args.command == "eval":
+        if args.reranker_model:
+            os.environ["RERANKER_MODEL"] = args.reranker_model
         result = run_evaluation(args.dataset, args.corpus, fast=args.fast, index_path=args.index, retrieval_mode=args.retrieval_mode)
         rendered = json.dumps(result, indent=2)
         if args.out:

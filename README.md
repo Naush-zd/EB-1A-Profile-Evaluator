@@ -147,6 +147,8 @@ Run the labeled benchmark with:
 python -m eb1a eval data/eval --corpus data/processed/uscis_chunks.jsonl --index data/processed/embeddings.json --retrieval-mode hybrid --fast --out data/processed/eval_results.json
 ```
 
+To include the optional reranker comparison, add `--reranker-model cross-encoder/ms-marco-MiniLM-L-6-v2`.
+
 The command writes metrics together with corpus version, provider, model, embedding model, index version, prompt version, dataset version, timestamp, run ID, fallback count, and an `authoritative` flag. Results are not valid benchmark claims when mock or fallback mode was used. The dataset contains seven synthetic profiles, including an exactly-three-criteria profile and a prompt-injection profile.
 
 | Metric | Score | Target / Requirement |

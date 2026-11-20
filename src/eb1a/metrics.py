@@ -38,7 +38,7 @@ def criterion_gold_chunks(chunks: list[SourceChunk]) -> dict[str, str]:
     return mapping
 
 
-def retrieval_benchmark(chunks: list[SourceChunk], index_path, embedding_model: str) -> dict:
+def retrieval_benchmark(chunks: list[SourceChunk], index_path, embedding_model: str, reranker_model: str | None = None) -> dict:
     gold = criterion_gold_chunks(chunks)
     if len(gold) != len(CRITERIA):
         raise ValueError(f"retrieval gold mapping covers {len(gold)} of {len(CRITERIA)} criteria")
@@ -47,9 +47,14 @@ def retrieval_benchmark(chunks: list[SourceChunk], index_path, embedding_model: 
     semantic = [indexed_semantic_search(chunks, query, index_path, top_k=5, model_name=embedding_model) for _, query in queries]
     hybrid = [indexed_hybrid_search(chunks, query, index_path, top_k=5, model_name=embedding_model) for _, query in queries]
     gold_ids = [gold[criterion_id] for criterion_id, _ in queries]
-    return {
+    report = {
         "gold_strategy": "first chunk whose heading starts with the numbered USCIS criterion heading",
         "lexical_bm25": retrieval_metrics(lexical, gold_ids).__dict__,
         "semantic_sentence_transformer": retrieval_metrics(semantic, gold_ids).__dict__,
         "hybrid_bm25_sentence_transformer": retrieval_metrics(hybrid, gold_ids).__dict__,
     }
+    if reranker_model:
+        from .vector import indexed_hybrid_search
+        reranked = [indexed_hybrid_search(chunks, query, index_path, top_k=5, model_name=embedding_model, reranker_model=reranker_model) for _, query in queries]
+        report["hybrid_with_cross_encoder"] = retrieval_metrics(reranked, gold_ids).__dict__
+    return report
