@@ -8,3 +8,4 @@ def test_api_has_health_and_assess_routes():
     paths = {route.path for route in app.routes}
     assert "/health" in paths
     assert "/assess" in paths
+    assert "/ingest/profile" in paths

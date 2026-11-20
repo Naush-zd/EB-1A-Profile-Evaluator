@@ -134,7 +134,7 @@ $env:PYTHONPATH = "src"
 python -m streamlit run streamlit_app.py
 ```
 
-Open `http://localhost:8501`, keep the default corpus path `data/processed/uscis_chunks.jsonl`, upload a TXT/PDF profile, and click **Evaluate profile**. The interface loads `.env`, shows the configured provider before evaluation, and displays whether the result came from the LLM or the clearly labeled local fallback. It shows the readiness score, all criterion assessments, validation warnings, run metadata, and a downloadable JSON result. It never displays an accuracy percentage for an unlabeled upload.
+Open `http://localhost:8501`, keep the default corpus path `data/processed/uscis_chunks.jsonl`, upload a TXT/PDF profile, and click **Evaluate profile**. The interface loads `.env`, shows the configured provider before evaluation, and displays whether the result came from the production LLM. Provider or index failures are shown explicitly; production mode does not silently substitute heuristic output. It shows the readiness score, all criterion assessments, validation warnings, run metadata, and a downloadable JSON result. It never displays an accuracy percentage for an unlabeled upload.
 
 ## Evaluation Results & Failure Analysis
 
@@ -152,12 +152,13 @@ The command writes metrics together with corpus version, provider, model, embedd
 | Citation Validity Rate | Written by the evaluation run | Citation IDs and source metadata |
 | Citation Quality Rate | Written by the evaluation run | Exact quote and locator match |
 | Hallucinated Evidence Rate | Written by the evaluation run | Evidence quote must match profile |
+| Retrieval Recall / MRR | Written by the evaluation run | BM25, semantic, and hybrid comparison |
 
 The deterministic hashing vector search is an offline regression baseline, not a semantic embedding model. It is excluded from production retrieval and benchmark claims.
 
 ### Failure Analysis
 
-The report produced by each run contains per-criterion results and a confusion matrix. Review borderline `partial` versus `strong` decisions manually; subjective regulatory thresholds often require corroborating material such as national/international stature or geographic and industry wage data. Do not copy a previous run's percentages into product claims.
+The report produced by each run contains per-criterion results, a confusion matrix, and a `failure_analysis` list linking every incorrect decision to its profile evidence, retrieved chunks, citations, and reasoning. Review borderline `partial` versus `strong` decisions manually; subjective regulatory thresholds often require corroborating material such as national/international stature or geographic and industry wage data. Do not copy a previous run's percentages into product claims.
 
 1. **Absence Classification (`insufficient_info` vs `missing`)**:
    - When profiles explicitly state "no evidence provided", models sometimes categorize the criterion as `missing` rather than `insufficient_info`. Both signify inadequate proof to satisfy the regulatory standard, but `insufficient_info` is preferred to prompt the user for additional documentation.

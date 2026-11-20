@@ -34,6 +34,21 @@ def create_app():
     def health():
         return {"status": "ok"}
 
+    @app.post("/ingest/profile")
+    async def ingest_profile(file: UploadFile = File(...)):
+        if not file.filename or Path(file.filename).suffix.lower() not in {".txt", ".pdf"}:
+            raise HTTPException(status_code=400, detail="upload a .txt or .pdf profile")
+        data = await file.read()
+        if len(data) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="profile exceeds 10 MB limit")
+        with tempfile.TemporaryDirectory() as directory:
+            profile_path = Path(directory) / Path(file.filename).name
+            profile_path.write_bytes(data)
+            try:
+                return {"profile": load_profile(profile_path).model_dump(mode="json")}
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/assess")
     async def assess(file: UploadFile = File(...), corpus: str = "data/processed/uscis_chunks.jsonl"):
         if not file.filename or Path(file.filename).suffix.lower() not in {".txt", ".pdf"}:

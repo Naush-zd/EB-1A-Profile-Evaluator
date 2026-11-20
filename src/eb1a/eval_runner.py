@@ -19,6 +19,7 @@ def run_evaluation(dataset: str | Path, corpus: str | Path, fast: bool = False, 
     _load_local_env()
     provider = None if os.getenv("LLM_PROVIDER", "mock").lower() == "mock" else get_llm_provider()
     comparisons = []
+    failure_analysis = []
     chunk_ids = {c.chunk_id for c in chunks}
     total_evidence_spans = 0
     hallucinated_spans = 0
@@ -40,7 +41,22 @@ def run_evaluation(dataset: str | Path, corpus: str | Path, fast: bool = False, 
             total_llm_calls += assessment.run.llm_calls
             fallback_count += int(assessment.run.fallback_used)
         actual = {item.criterion_id.value: item.rating for item in assessment.criteria}
-        comparisons.append(compare_case(case, actual))
+        comparison = compare_case(case, actual)
+        comparisons.append(comparison)
+        assessment_by_id = {item.criterion_id.value: item for item in assessment.criteria}
+        for row in comparison["results"]:
+            if not row["correct"]:
+                item = assessment_by_id[row["criterion_id"]]
+                failure_analysis.append({
+                    "profile_id": case["profile_id"],
+                    "criterion_id": row["criterion_id"],
+                    "expected_rating": row["expected"],
+                    "actual_rating": row["actual"],
+                    "evidence": [e.model_dump(mode="json") for e in item.evidence],
+                    "citations": [c.model_dump(mode="json") for c in item.citations],
+                    "retrieved_chunk_ids": item.retrieval.retrieved_chunk_ids if item.retrieval else [],
+                    "reasoning": item.reasoning,
+                })
 
         profile_text_lower = profile.content.lower()
         for item in assessment.criteria:
@@ -66,6 +82,7 @@ def run_evaluation(dataset: str | Path, corpus: str | Path, fast: bool = False, 
     summary["hallucinated_evidence_rate"] = round(hallucinated_spans / total_evidence_spans, 3) if total_evidence_spans else 0.0
     summary["llm_calls"] = total_llm_calls
     summary["fallback_count"] = fallback_count
+    summary["failure_analysis"] = failure_analysis
     index_version = None
     if index_path and Path(index_path).exists():
         try:
