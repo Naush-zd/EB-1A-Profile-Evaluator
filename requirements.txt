@@ -1,0 +1,17 @@
+# Core schema and document ingestion
+pydantic>=2.7,<3
+pypdf>=5,<7
+
+# Real semantic embeddings and optional cross-encoder reranking
+sentence-transformers>=3.0,<6
+
+# Optional FastAPI service
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+python-multipart>=0.0.9,<1
+
+# Optional Streamlit interface
+streamlit>=1.40,<2
+
+# Optional AWS Bedrock provider
+boto3>=1.35,<2
