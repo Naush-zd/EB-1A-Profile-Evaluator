@@ -18,5 +18,5 @@ def test_provider_path_runs_one_structured_assessment_per_criterion():
     chunks = chunk_text("EB-1A extraordinary ability policy manual. Awards and prizes. Membership requires outstanding achievement. Published material about the person. Judging the work of others. Original contributions of major significance. Authorship of scholarly articles. Display at artistic exhibitions. Leading or critical role. High salary. Commercial success in the performing arts.", "u", "t")
     assessment = assess_profile(profile, chunks, "v1", provider=DeterministicProvider())
     assert len(assessment.criteria) == 10
-    assert all(item.rating == "partial" for item in assessment.criteria)
+    assert all(item.rating == "insufficient_info" for item in assessment.criteria)
     assert validate_grounding(assessment, profile, chunks) == []

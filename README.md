@@ -151,15 +151,24 @@ To include the optional reranker comparison, add `--reranker-model cross-encoder
 
 The command writes metrics together with corpus version, provider, model, embedding model, index version, prompt version, dataset version, timestamp, run ID, fallback count, and an `authoritative` flag. Results are not valid benchmark claims when mock or fallback mode was used. The dataset contains seven synthetic profiles, including an exactly-three-criteria profile and a prompt-injection profile.
 
-| Metric | Score | Target / Requirement |
-|---|---|---|
-| Rating Accuracy | Written by the evaluation run | Requires labeled gold cases |
-| Citation Validity Rate | Written by the evaluation run | Citation IDs and source metadata |
-| Citation Quality Rate | Written by the evaluation run | Exact quote and locator match |
-| Hallucinated Evidence Rate | Written by the evaluation run | Evidence quote must match profile |
-| Retrieval Recall / MRR | Written by the evaluation run | BM25, semantic, and hybrid comparison |
+| Metric | Latest recorded score | Target / interpretation |
+|---|---:|---|
+| Rating Accuracy | **97.14% (68/70)** | Synthetic labeled benchmark; not legal or USCIS accuracy |
+| Citation Validity Rate | **100%** | Citation IDs and source metadata validated |
+| Citation Quality Rate | **100%** | Exact quote and locator match |
+| Hallucinated Evidence Rate | **0%** | Evidence quotes matched the supplied profiles |
+| BM25 Recall@3 / Recall@5 / MRR | **0.95 / 0.95 / 0.867** | Lexical diagnostic retrieval benchmark |
+| Sentence Transformer Recall@3 / Recall@5 / MRR | **1.00 / 1.00 / 0.967** | Semantic diagnostic retrieval benchmark |
+| Hybrid Recall@3 / Recall@5 / MRR | **1.00 / 1.00 / 0.975** | BM25 + Sentence Transformer diagnostic benchmark |
+
+Recorded run metadata: `run_id=d3e5feeca4a64642a577c88ba6de1d7e`, `timestamp=2026-11-20T21:27:47`, `provider=groq`, `model=openai/gpt-oss-20b`, `embedding_model=all-MiniLM-L6-v2`, `corpus_version=6ee70cfb57c96811`, `dataset_version=84ccb46bf30e54d6`, `index_version=ce391ff7c523ccae`, `prompt_version=criterion-v3`, `authoritative=true`. Retrieval labels are based on official numbered criterion-heading matches and two paraphrased queries per criterion; they are diagnostic labels, not human relevance judgments.
 
 The deterministic hashing vector search is an offline regression baseline, not a semantic embedding model. It is excluded from production retrieval and benchmark claims. Optional reranking should be reported separately from the BM25-plus-embedding baseline.
+
+### Implemented assignment bonuses
+
+- **Better retrieval:** BM25 plus Sentence Transformer hybrid retrieval, with an optional cross-encoder reranker and before/after retrieval metrics.
+- **Guardrails:** uploaded prompt-injection text is flagged as data, not instructions; malformed, empty, garbled, and scanned inputs fail explicitly.
 
 ### Failure Analysis
 

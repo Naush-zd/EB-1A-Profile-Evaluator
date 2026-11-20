@@ -42,13 +42,26 @@ def retrieval_benchmark(chunks: list[SourceChunk], index_path, embedding_model: 
     gold = criterion_gold_chunks(chunks)
     if len(gold) != len(CRITERIA):
         raise ValueError(f"retrieval gold mapping covers {len(gold)} of {len(CRITERIA)} criteria")
-    queries = [(criterion.value, f"{criterion.value.replace('_', ' ')} {CRITERIA[criterion]}") for criterion in CRITERIA]
+    paraphrases = {
+        "awards": ["proof of recognition at national field level", "honor granted for excellence among competitors"],
+        "membership": ["professional body admission based on peer recognized achievement", "selective association eligibility standards"],
+        "published_material": ["independent press coverage describing the applicant's work", "major media profile about the person's career"],
+        "judging": ["assessment of peers' submissions in the same discipline", "reviewing the work of other professionals"],
+        "original_contributions": ["impactful innovation adopted across the field", "work with substantial influence beyond the employer"],
+        "scholarly_articles": ["peer reviewed research authorship", "technical papers in professional publications"],
+        "exhibitions": ["public gallery presentation of creative work", "artistic work shown to an audience"],
+        "leading_critical_role": ["essential responsibilities at a reputable institution", "senior role whose work affected a distinguished organization"],
+        "high_salary": ["pay ranking far above industry peers", "compensation unusually high compared with field norms"],
+        "commercial_success": ["ticket revenue demonstrates market success in performance", "recorded sales show commercial achievement"],
+    }
+    queries = [(criterion.value, query) for criterion in CRITERIA for query in paraphrases[criterion.value]]
     lexical = [bm25_search(chunks, query, top_k=5) for _, query in queries]
     semantic = [indexed_semantic_search(chunks, query, index_path, top_k=5, model_name=embedding_model) for _, query in queries]
     hybrid = [indexed_hybrid_search(chunks, query, index_path, top_k=5, model_name=embedding_model) for _, query in queries]
     gold_ids = [gold[criterion_id] for criterion_id, _ in queries]
     report = {
-        "gold_strategy": "first chunk whose heading starts with the numbered USCIS criterion heading",
+        "gold_strategy": "official numbered criterion heading matched to two paraphrased queries per criterion; diagnostic labels, not human relevance judgments",
+        "query_count_per_criterion": 2,
         "lexical_bm25": retrieval_metrics(lexical, gold_ids).__dict__,
         "semantic_sentence_transformer": retrieval_metrics(semantic, gold_ids).__dict__,
         "hybrid_bm25_sentence_transformer": retrieval_metrics(hybrid, gold_ids).__dict__,
@@ -56,4 +69,8 @@ def retrieval_benchmark(chunks: list[SourceChunk], index_path, embedding_model: 
     if reranker_model:
         reranked = [indexed_hybrid_search(chunks, query, index_path, top_k=5, model_name=embedding_model, reranker_model=reranker_model) for _, query in queries]
         report["hybrid_with_cross_encoder"] = retrieval_metrics(reranked, gold_ids).__dict__
+    report["saturation_warning"] = all(
+        report[name]["mean_reciprocal_rank"] == 1.0
+        for name in ("lexical_bm25", "semantic_sentence_transformer", "hybrid_bm25_sentence_transformer")
+    )
     return report

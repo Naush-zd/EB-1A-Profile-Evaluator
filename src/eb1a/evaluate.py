@@ -31,6 +31,15 @@ def _build_overall(profile_id: str, corpus_version: str, assessments: list[Crite
     )
 
 
+def _normalize_provider_rating(data: dict, grounded_evidence: list[dict]) -> dict:
+    """Fail closed when a provider rates a criterion without usable profile evidence."""
+    data["evidence"] = grounded_evidence
+    if not grounded_evidence and data.get("rating") != "insufficient_info":
+        data["rating"] = "insufficient_info"
+        data["reasoning"] = "The provider returned no exact, grounded profile evidence for this criterion; the result is therefore insufficient information rather than a finding that the criterion is missing."
+    return data
+
+
 KEYWORDS = {
     CriterionId.AWARDS: ["award", "prize", "honor"],
     CriterionId.MEMBERSHIP: ["membership", "member", "association"],
@@ -114,6 +123,11 @@ def assess_profile(profile: ProfileDocument, chunks: list[SourceChunk], corpus_v
                     "quote": top_chunk.text[:500],
                 })
             payload_data["citations"] = enriched_citations
+            grounded_evidence = [
+                item for item in payload_data.get("evidence", [])
+                if any(item.get("quote") == allowed.quote for allowed in evidence)
+            ]
+            payload_data = _normalize_provider_rating(payload_data, grounded_evidence)
             item = CriterionAssessment(criterion_id=criterion, retrieval=RetrievalMetadata(mode=retrieval_mode, top_k=3, embedding_model=embedding_model if retrieval_mode != "lexical" else None, reranker_model=reranker_model, retrieved_chunk_ids=[r.chunk.chunk_id for r in retrieved]), **payload_data)
             assessments.append(item)
             continue
@@ -135,7 +149,16 @@ def assess_profile_batch(profile, chunks, corpus_version, provider, skip_empty_e
     active_criteria = [criterion for criterion, evidence in evidence_by.items() if evidence] if skip_empty_evidence else list(CRITERIA)
     if not active_criteria:
         return assess_profile(profile, chunks, corpus_version, provider=None, skip_empty_evidence=True)
-    payload = provider.generate_structured(build_batch_prompt(profile.content, evidence_by, chunks, active_criteria), BatchAssessmentPayload)
+    retrieved_by = {}
+    for criterion in active_criteria:
+        query = f"{criterion.value.replace('_', ' ')} {CRITERIA[criterion]}"
+        if retrieval_mode == "hybrid":
+            if not index_path:
+                raise RuntimeError("production hybrid retrieval requires a persisted embedding index")
+            retrieved_by[criterion] = indexed_hybrid_search(chunks, query, index_path, top_k=2, model_name=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"), reranker_model=os.getenv("RERANKER_MODEL") or None)
+        else:
+            retrieved_by[criterion] = search(chunks, query, top_k=2)
+    payload = provider.generate_structured(build_batch_prompt(profile.content, evidence_by, chunks, active_criteria, retrieved_by), BatchAssessmentPayload)
     result_by_id = {item.criterion_id: item for item in payload.criteria}
     assessments = []
     for criterion in CRITERIA:
@@ -143,18 +166,13 @@ def assess_profile_batch(profile, chunks, corpus_version, provider, skip_empty_e
         if criterion not in active_criteria:
             assessments.append(CriterionAssessment(criterion_id=criterion, rating="insufficient_info", evidence=[], reasoning=f"No explicit supporting evidence for {criterion.value.replace('_', ' ')} was found in the candidate profile.", citations=[], next_steps=["Add dated, independently verifiable supporting documentation."]))
             continue
-        query = f"{criterion.value.replace('_', ' ')} {CRITERIA[criterion]}"
-        if retrieval_mode == "hybrid":
-            if not index_path:
-                raise RuntimeError("production hybrid retrieval requires a persisted embedding index")
-            retrieved = indexed_hybrid_search(chunks, query, index_path, top_k=2, model_name=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"), reranker_model=os.getenv("RERANKER_MODEL") or None)
-        else:
-            retrieved = search(chunks, query, top_k=2)
+        retrieved = retrieved_by[criterion]
         raw = result_by_id.get(criterion)
         data = raw.model_dump() if raw else {"rating": "insufficient_info", "evidence": [], "reasoning": "No valid provider result was returned.", "citations": [], "next_steps": ["Add supporting documentation."]}
         data.pop("criterion_id", None)
         allowed_quotes = {item.quote for item in evidence}
-        data["evidence"] = [item for item in data.get("evidence", []) if item.get("quote") in allowed_quotes]
+        grounded_evidence = [item for item in data.get("evidence", []) if item.get("quote") in allowed_quotes]
+        data = _normalize_provider_rating(data, grounded_evidence)
         chunk_by_id = {item.chunk.chunk_id: item.chunk for item in retrieved}
         citations = []
         for citation in data.get("citations", []):

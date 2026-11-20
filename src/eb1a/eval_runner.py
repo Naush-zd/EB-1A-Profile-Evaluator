@@ -28,6 +28,8 @@ def run_evaluation(dataset: str | Path, corpus: str | Path, fast: bool = False, 
     quality_citations = 0
     total_llm_calls = 0
     fallback_count = 0
+    injection_cases = 0
+    injection_detected = 0
 
     cases = load_cases(dataset)
     for idx, case in enumerate(cases):
@@ -36,6 +38,9 @@ def run_evaluation(dataset: str | Path, corpus: str | Path, fast: bool = False, 
             if case_delay > 0:
                 time.sleep(case_delay)
         profile = load_profile(Path(dataset) / case["profile_file"])
+        if "injection" in case["profile_id"] or profile.suspicious_instructions:
+            injection_cases += 1
+            injection_detected += int(bool(profile.suspicious_instructions))
         assessment = assess_with_fallback(profile, chunks, provider=provider, skip_empty_evidence=fast, allow_heuristic_fallback=provider is None, index_path=index_path, retrieval_mode="lexical" if provider is None else retrieval_mode)
         if assessment.run:
             total_llm_calls += assessment.run.llm_calls
@@ -83,6 +88,13 @@ def run_evaluation(dataset: str | Path, corpus: str | Path, fast: bool = False, 
     summary["llm_calls"] = total_llm_calls
     summary["fallback_count"] = fallback_count
     summary["failure_analysis"] = failure_analysis
+    summary["guardrails"] = {
+        "prompt_injection_cases": injection_cases,
+        "prompt_injection_detected": injection_detected,
+        "prompt_injection_detection_rate": round(injection_detected / injection_cases, 3) if injection_cases else None,
+        "profile_content_is_data": True,
+        "scanned_pdf_policy": "reject with explicit unsupported-input error",
+    }
     index_version = None
     if index_path and Path(index_path).exists():
         try:
