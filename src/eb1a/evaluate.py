@@ -1,12 +1,34 @@
 from .criteria import CRITERIA, CriterionId
-from .schemas import Assessment, AssessmentRun, BatchAssessmentPayload, CriterionAssessment, CriterionAssessmentPayload, EvidenceSpan, OverallAssessment, ProfileDocument, SourceCitation, RetrievalMetadata
+from .schemas import Assessment, AssessmentRun, BatchAssessmentPayload, CriterionAssessment, CriterionAssessmentPayload, EvidenceSpan, OverallAssessment, ProfileDocument, SourceChunk, SourceCitation, RetrievalMetadata
 from .retrieve import search
 from .vector import indexed_hybrid_search, indexed_semantic_search
-from .schemas import SourceChunk
 from .prompts import build_criterion_prompt
 from .batch import build_batch_prompt
 import os
 import time
+
+_RATING_WEIGHT = {"strong": 3, "partial": 2, "missing": 1, "insufficient_info": 0}
+_RATING_SCORE = {"strong": 12, "partial": 7, "missing": 2, "insufficient_info": 0}
+
+
+def _build_overall(profile_id: str, corpus_version: str, assessments: list[CriterionAssessment]) -> Assessment:
+    ranked = sorted(assessments, key=lambda item: _RATING_WEIGHT[item.rating], reverse=True)
+    qualifying = sum(item.rating in {"strong", "partial"} for item in assessments)
+    score = round(sum(_RATING_SCORE[item.rating] for item in assessments) / 120 * 100, 1)
+    label = "strong" if score >= 75 else "promising" if score >= 50 else "developing" if score >= 25 else "early"
+    return Assessment(
+        profile_id=profile_id,
+        corpus_version=corpus_version,
+        criteria=assessments,
+        overall=OverallAssessment(
+            strongest_criteria=[x.criterion_id for x in ranked[:3] if x.rating in {"strong", "partial"}],
+            main_gaps=[x.criterion_id.value for x in assessments if x.rating == "insufficient_info"],
+            criteria_meeting_initial_threshold=qualifying,
+            readiness_score=score,
+            readiness_label=label,
+            disclaimer="This is a prototype evidence-screening heuristic, not legal advice or a prediction of a USCIS outcome.",
+        ),
+    )
 
 
 KEYWORDS = {
@@ -105,19 +127,7 @@ def assess_profile(profile: ProfileDocument, chunks: list[SourceChunk], corpus_v
             criterion_id=criterion, rating=rating, evidence=evidence, reasoning=reasoning,
             citations=citations, next_steps=["Add dated, independently verifiable supporting documentation."], retrieval=RetrievalMetadata(mode=retrieval_mode, top_k=3, retrieved_chunk_ids=[r.chunk.chunk_id for r in retrieved])
         ))
-    ranked = sorted(assessments, key=lambda item: {"strong": 3, "partial": 2, "missing": 1, "insufficient_info": 0}[item.rating], reverse=True)
-    qualifying = sum(item.rating in {"strong", "partial"} for item in assessments)
-    score = round(sum({"strong": 12, "partial": 7, "missing": 2, "insufficient_info": 0}[item.rating] for item in assessments) / 120 * 100, 1)
-    label = "strong" if score >= 75 else "promising" if score >= 50 else "developing" if score >= 25 else "early"
-    return Assessment(
-        profile_id=profile.profile_id, corpus_version=corpus_version, criteria=assessments,
-        overall=OverallAssessment(
-            strongest_criteria=[x.criterion_id for x in ranked[:3] if x.rating in {"strong", "partial"}],
-            main_gaps=[x.criterion_id.value for x in assessments if x.rating == "insufficient_info"],
-            criteria_meeting_initial_threshold=qualifying, readiness_score=score, readiness_label=label,
-            disclaimer="This is a prototype evidence-screening heuristic, not legal advice or a prediction of a USCIS outcome.",
-        ),
-    )
+    return _build_overall(profile.profile_id, corpus_version, assessments)
 
 
 def assess_profile_batch(profile, chunks, corpus_version, provider, skip_empty_evidence=False, retrieval_mode="lexical", index_path=None):
@@ -156,11 +166,7 @@ def assess_profile_batch(profile, chunks, corpus_version, provider, skip_empty_e
             citations.append({"chunk_id": chunk.chunk_id, "source_url": chunk.source_url, "locator": chunk.locator, "quote": chunk.text[:500]})
         data["citations"] = citations
         assessments.append(CriterionAssessment(criterion_id=criterion, retrieval=RetrievalMetadata(mode=retrieval_mode, top_k=2, embedding_model=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2") if retrieval_mode != "lexical" else None, reranker_model=os.getenv("RERANKER_MODEL") or None, retrieved_chunk_ids=[r.chunk.chunk_id for r in retrieved]), **data))
-    ranked = sorted(assessments, key=lambda item: {"strong": 3, "partial": 2, "missing": 1, "insufficient_info": 0}[item.rating], reverse=True)
-    qualifying = sum(item.rating in {"strong", "partial"} for item in assessments)
-    score = round(sum({"strong": 12, "partial": 7, "missing": 2, "insufficient_info": 0}[item.rating] for item in assessments) / 120 * 100, 1)
-    label = "strong" if score >= 75 else "promising" if score >= 50 else "developing" if score >= 25 else "early"
-    return Assessment(profile_id=profile.profile_id, corpus_version=corpus_version, criteria=assessments, overall=OverallAssessment(strongest_criteria=[item.criterion_id for item in ranked[:3] if item.rating in {"strong", "partial"}], main_gaps=[item.criterion_id.value for item in assessments if item.rating == "insufficient_info"], criteria_meeting_initial_threshold=qualifying, readiness_score=score, readiness_label=label, disclaimer="This is a prototype evidence-screening heuristic, not legal advice or a prediction of a USCIS outcome."))
+    return _build_overall(profile.profile_id, corpus_version, assessments)
 
 
 def validate_grounding(assessment: Assessment, profile: ProfileDocument, chunks: list[SourceChunk]) -> list[str]:

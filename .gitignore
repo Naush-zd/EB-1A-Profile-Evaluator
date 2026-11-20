@@ -8,3 +8,6 @@ data/processed/
 *.json
 __pycache__/
 .pytest_cache/
+.venv/
+venv/
+*.egg-info/

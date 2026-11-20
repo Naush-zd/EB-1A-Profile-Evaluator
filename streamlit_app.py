@@ -23,9 +23,16 @@ _load_local_env()
 configured_provider = os.getenv("LLM_PROVIDER", "mock").lower()
 configured_model = os.getenv("LLM_MODEL", "")
 st.sidebar.info(f"Configured evaluator: {configured_provider}" + (f" / {configured_model}" if configured_model else ""))
+if configured_provider == "mock":
+    st.warning(
+        "LLM_PROVIDER is set to `mock`, which has no production assessment path. "
+        "Set LLM_PROVIDER to openai, groq, gemini, or bedrock (with the matching API key in `.env`) "
+        "before evaluating a real profile."
+    )
+
 uploaded = st.file_uploader("Upload a TXT or PDF profile", type=["txt", "pdf"])
 
-if uploaded and st.button("Evaluate profile"):
+if uploaded and st.button("Evaluate profile", disabled=configured_provider == "mock"):
     corpus = Path(corpus_path)
     if not corpus.exists():
         st.error("Knowledge-base chunks were not found. Build the knowledge base first.")
@@ -37,7 +44,7 @@ if uploaded and st.button("Evaluate profile"):
             try:
                 profile = load_profile(profile_path)
                 chunks = read_jsonl(corpus)
-                provider = None if os.getenv("LLM_PROVIDER", "mock").lower() == "mock" else get_llm_provider()
+                provider = get_llm_provider()
                 assessment = assess_with_fallback(profile, chunks, provider=provider, skip_empty_evidence=fast_mode, allow_heuristic_fallback=False, index_path=corpus.with_name("embeddings.json"), retrieval_mode="hybrid")
                 errors = validate_grounding(assessment, profile, chunks)
                 if errors:
@@ -50,5 +57,12 @@ if uploaded and st.button("Evaluate profile"):
                 st.subheader("Assessment JSON")
                 st.code(assessment.model_dump_json(indent=2), language="json")
                 st.download_button("Download assessment JSON", assessment.model_dump_json(indent=2), "assessment.json", "application/json")
+            except ValueError as exc:
+                st.error(f"Could not read the uploaded profile: {exc}")
             except Exception as exc:
-                st.error(str(exc))
+                st.error(
+                    f"Assessment failed: {exc}\n\n"
+                    "This usually means the LLM provider was unavailable, rate-limited, or the embedding "
+                    "index at `embeddings.json` is missing next to the corpus. Verify the provider with "
+                    "`python -m eb1a verify-provider` and confirm the knowledge base was built with `build-kb`."
+                )
