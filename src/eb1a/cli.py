@@ -45,6 +45,8 @@ def main() -> int:
     retrieve.add_argument("--hash-baseline", action="store_true")
     retrieve.add_argument("--embedding-model", default=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"))
     retrieve.add_argument("--index", type=Path)
+    retrieve.add_argument("--rerank", action="store_true", help="Apply optional neural cross-encoder reranking")
+    retrieve.add_argument("--reranker-model", default=os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2"))
     assess = sub.add_parser("assess")
     assess.add_argument("profile", type=Path)
     assess.add_argument("--corpus", type=Path, required=True)
@@ -88,7 +90,13 @@ def main() -> int:
         elif args.semantic:
             results = indexed_semantic_search(chunks, args.query, args.index, args.top_k, args.embedding_model) if args.index else semantic_search(chunks, args.query, args.top_k, args.embedding_model, allow_download=True)
         elif args.hybrid:
-            results = hybrid_search(chunks, args.query, args.top_k, model_name=args.embedding_model, allow_download=True)
+            if args.rerank:
+                from .vector import indexed_hybrid_search
+                if not args.index:
+                    raise SystemExit("--rerank requires --index")
+                results = indexed_hybrid_search(chunks, args.query, args.index, args.top_k, model_name=args.embedding_model, reranker_model=args.reranker_model)
+            else:
+                results = hybrid_search(chunks, args.query, args.top_k, model_name=args.embedding_model, allow_download=True)
         else:
             results = search(chunks, args.query, args.top_k)
         print(json.dumps([r.model_dump(mode="json") for r in results], indent=2))

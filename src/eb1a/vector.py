@@ -75,7 +75,7 @@ def hybrid_search(chunks, query, top_k=5, *, model_name="all-MiniLM-L6-v2", allo
             records[result.chunk.chunk_id] = result
     return [records[k] for k, _ in sorted(scores.items(), key=lambda x: (-x[1], x[0]))[:top_k]]
 
-def indexed_hybrid_search(chunks, query, index_path, top_k=5, *, model_name="all-MiniLM-L6-v2"):
+def indexed_hybrid_search(chunks, query, index_path, top_k=5, *, model_name="all-MiniLM-L6-v2", reranker_model=None):
     from .retrieve import bm25_search
     lexical = bm25_search(chunks, query, max(top_k, 10))
     semantic = indexed_semantic_search(chunks, query, index_path, max(top_k, 10), model_name)
@@ -84,4 +84,8 @@ def indexed_hybrid_search(chunks, query, index_path, top_k=5, *, model_name="all
         for rank, result in enumerate(ranking, 1):
             scores[result.chunk.chunk_id] = scores.get(result.chunk.chunk_id, 0) + 1 / (60 + rank)
             records[result.chunk.chunk_id] = result
-    return [records[k] for k, _ in sorted(scores.items(), key=lambda x: (-x[1], x[0]))[:top_k]]
+    candidates = [records[k] for k, _ in sorted(scores.items(), key=lambda x: (-x[1], x[0]))[:max(top_k, 10)]]
+    if reranker_model:
+        from .rerank import rerank
+        return rerank(query, candidates, reranker_model, top_k)
+    return candidates[:top_k]

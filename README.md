@@ -61,16 +61,19 @@ tests/              # unit and contract tests
 - **Synthetic profiles only** in the repository.
 - **Versioned corpus**: store source URL, retrieval date, content hash, and policy revision.
 - **Local semantic retrieval**: Sentence Transformers with a swappable embedding model.
+- **Optional neural reranking**: A Sentence Transformers cross-encoder can rerank the hybrid top-k candidates when `RERANKER_MODEL` is configured.
 
 Install semantic retrieval with `python -m pip install -e ".[embeddings]"`. The default model is `all-MiniLM-L6-v2`; the first semantic query downloads it into the local model cache. Production retrieval requires the real embedding model and persistent index. Use `--hash-baseline` only for isolated regression tests.
+
+For the optional reranking bonus, set `RERANKER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2` and run `python -m eb1a retrieve data/processed/uscis_chunks.jsonl "awards for excellence" --hybrid --index data/processed/embeddings.json --rerank`. The cross-encoder reranks retrieved candidates; it does not replace BM25 or embeddings.
 
 ## Run target
 
 The first milestone is a deterministic CLI that accepts `.txt` and `.pdf`, emits validated JSON, and runs without a UI:
 
 ```powershell
-python -m eb1a.cli assess data/eval/profile_01.txt --out assessment.json
-python -m eb1a.cli eval data/eval
+python -m eb1a assess data/eval/profile_awards.txt --corpus data/processed/uscis_chunks.jsonl --index data/processed/embeddings.json --retrieval-mode hybrid --out assessment.json
+python -m eb1a eval data/eval --corpus data/processed/uscis_chunks.jsonl --index data/processed/embeddings.json --retrieval-mode hybrid --fast --out data/processed/evaluation.json
 ```
 
 ## Run locally
@@ -92,7 +95,7 @@ To use a hosted provider, configure the environment before running `assess`:
 ```powershell
 $env:LLM_PROVIDER = "groq" # openai, groq, gemini, or bedrock
 $env:GROQ_API_KEY = "..."   # use the matching provider variable
-$env:LLM_MODEL = "llama-3.1-8b-instant" # high throughput; or llama-3.3-70b-versatile
+$env:LLM_MODEL = "openai/gpt-oss-20b" # active Groq model; use the provider's verified model list
 python -m eb1a assess data/eval/profile_researcher.txt --corpus data/processed/uscis_chunks.jsonl --out assessment.json
 ```
 
@@ -154,7 +157,7 @@ The command writes metrics together with corpus version, provider, model, embedd
 | Hallucinated Evidence Rate | Written by the evaluation run | Evidence quote must match profile |
 | Retrieval Recall / MRR | Written by the evaluation run | BM25, semantic, and hybrid comparison |
 
-The deterministic hashing vector search is an offline regression baseline, not a semantic embedding model. It is excluded from production retrieval and benchmark claims.
+The deterministic hashing vector search is an offline regression baseline, not a semantic embedding model. It is excluded from production retrieval and benchmark claims. Optional reranking should be reported separately from the BM25-plus-embedding baseline.
 
 ### Failure Analysis
 
@@ -166,4 +169,4 @@ The report produced by each run contains per-criterion results, a confusion matr
 ### Future Improvements
 1. **Dynamic Web Search Tool (Agentic Bonus)**: Suggesting relevant open calls, conferences, and judging panels for candidate gaps.
 2. **Re-ranking**: Add a cross-encoder after the BM25 plus Sentence Transformer baseline, then report before/after retrieval metrics.
-3. **Multi-Model LLM-as-Judge**: Automatically benchmarking prompt versions across Gemini and Groq to compare latency, cost, and grounding fidelity.
+3. **Independent LLM-as-Judge**: Add a separate judge run only after the labeled benchmark and citation-review protocol are stable.

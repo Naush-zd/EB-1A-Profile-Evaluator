@@ -40,11 +40,12 @@ def assess_profile(profile: ProfileDocument, chunks: list[SourceChunk], corpus_v
     assessments = []
     retrieval_mode = retrieval_mode or "lexical"
     embedding_model = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    reranker_model = os.getenv("RERANKER_MODEL") or None
     def retrieve(query):
         if retrieval_mode == "hybrid":
             if not index_path:
                 raise RuntimeError("production hybrid retrieval requires a persisted embedding index")
-            return indexed_hybrid_search(chunks, query, index_path, top_k=3, model_name=embedding_model)
+            return indexed_hybrid_search(chunks, query, index_path, top_k=3, model_name=embedding_model, reranker_model=reranker_model)
         if retrieval_mode == "semantic":
             if not index_path:
                 raise RuntimeError("production semantic retrieval requires a persisted embedding index")
@@ -66,7 +67,7 @@ def assess_profile(profile: ProfileDocument, chunks: list[SourceChunk], corpus_v
                     reasoning=f"No explicit supporting evidence for {criterion.value.replace('_', ' ')} was found in the candidate profile.",
                     citations=citations[:1] if citations else [],
                     next_steps=["Add dated, independently verifiable supporting documentation."],
-                    retrieval=RetrievalMetadata(mode=retrieval_mode, top_k=3, embedding_model=embedding_model if retrieval_mode != "lexical" else None, retrieved_chunk_ids=[r.chunk.chunk_id for r in retrieved])
+                    retrieval=RetrievalMetadata(mode=retrieval_mode, top_k=3, embedding_model=embedding_model if retrieval_mode != "lexical" else None, reranker_model=reranker_model, retrieved_chunk_ids=[r.chunk.chunk_id for r in retrieved])
                 ))
                 continue
             if index and getattr(provider, "provider_name", "") == "groq":
@@ -91,7 +92,7 @@ def assess_profile(profile: ProfileDocument, chunks: list[SourceChunk], corpus_v
                     "quote": top_chunk.text[:500],
                 })
             payload_data["citations"] = enriched_citations
-            item = CriterionAssessment(criterion_id=criterion, retrieval=RetrievalMetadata(mode=retrieval_mode, top_k=3, embedding_model=embedding_model if retrieval_mode != "lexical" else None, retrieved_chunk_ids=[r.chunk.chunk_id for r in retrieved]), **payload_data)
+            item = CriterionAssessment(criterion_id=criterion, retrieval=RetrievalMetadata(mode=retrieval_mode, top_k=3, embedding_model=embedding_model if retrieval_mode != "lexical" else None, reranker_model=reranker_model, retrieved_chunk_ids=[r.chunk.chunk_id for r in retrieved]), **payload_data)
             assessments.append(item)
             continue
         if evidence:
@@ -136,7 +137,7 @@ def assess_profile_batch(profile, chunks, corpus_version, provider, skip_empty_e
         if retrieval_mode == "hybrid":
             if not index_path:
                 raise RuntimeError("production hybrid retrieval requires a persisted embedding index")
-            retrieved = indexed_hybrid_search(chunks, query, index_path, top_k=2, model_name=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"))
+            retrieved = indexed_hybrid_search(chunks, query, index_path, top_k=2, model_name=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"), reranker_model=os.getenv("RERANKER_MODEL") or None)
         else:
             retrieved = search(chunks, query, top_k=2)
         raw = result_by_id.get(criterion)
@@ -154,7 +155,7 @@ def assess_profile_batch(profile, chunks, corpus_version, provider, skip_empty_e
             chunk = retrieved[0].chunk
             citations.append({"chunk_id": chunk.chunk_id, "source_url": chunk.source_url, "locator": chunk.locator, "quote": chunk.text[:500]})
         data["citations"] = citations
-        assessments.append(CriterionAssessment(criterion_id=criterion, retrieval=RetrievalMetadata(mode=retrieval_mode, top_k=2, embedding_model=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2") if retrieval_mode != "lexical" else None, retrieved_chunk_ids=[r.chunk.chunk_id for r in retrieved]), **data))
+        assessments.append(CriterionAssessment(criterion_id=criterion, retrieval=RetrievalMetadata(mode=retrieval_mode, top_k=2, embedding_model=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2") if retrieval_mode != "lexical" else None, reranker_model=os.getenv("RERANKER_MODEL") or None, retrieved_chunk_ids=[r.chunk.chunk_id for r in retrieved]), **data))
     ranked = sorted(assessments, key=lambda item: {"strong": 3, "partial": 2, "missing": 1, "insufficient_info": 0}[item.rating], reverse=True)
     qualifying = sum(item.rating in {"strong", "partial"} for item in assessments)
     score = round(sum({"strong": 12, "partial": 7, "missing": 2, "insufficient_info": 0}[item.rating] for item in assessments) / 120 * 100, 1)
