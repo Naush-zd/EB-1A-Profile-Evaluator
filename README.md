@@ -132,14 +132,14 @@ Use `POST /assess` with a TXT/PDF upload and `GET /health` for a readiness check
 Free-tier providers (especially Groq) impose strict limits:
 - **Automatic Cooldown & Backoff**: Automatically parses the exact wait time in Groq's 429 response (`try again in Xs/ms/m`) or `Retry-After` header and retries with progressive backoff up to 5 attempts.
 - **Disk Caching**: Structured LLM responses are cached under `.eb1a_cache/`. Re-running evaluations does not consume extra tokens or hit rate limits for identical prompts.
-- **Fast Mode (`--fast`)**: Skips making LLM calls for criteria that have zero candidate evidence keywords in the resume (automatically sets `insufficient_info`), reducing LLM calls by 70%.
+- **Fast Mode (`--fast`)**: Skips making LLM calls for criteria that have zero candidate evidence spans in the resume (automatically sets `insufficient_info`), reducing LLM calls while preserving a fail-closed result.
 - **Clean Ingestion**: HTML navbars and scripts are stripped during ingestion, cutting prompt token consumption by 60%.
-- **Model Choice**: Use active Groq models like `openai/gpt-oss-20b` or `openai/gpt-oss-120b`, or `gemini-2.0-flash` on Google Gemini for high throughput and lower rate-limit friction.
+- **Model Choice**: Use active Groq models like `openai/gpt-oss-20b` or `openai/gpt-oss-120b`, or configure Gemini with `GEMINI_MODEL=gemini-3.8-flash` or `gemini-3.5-flash-lite`.
 - **Provider failover**: Set `LLM_PROVIDER_CHAIN=groq,gemini,openai` to try configured real providers in order. The selected provider, attempted providers, and failover status are recorded in run metadata. Production never falls through to heuristic output.
 
 ## LLM providers
 
-Set `LLM_PROVIDER` to `mock`, `openai`, `groq`, `gemini`, or `bedrock`. Credentials are read only from environment variables: `OPENAI_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, or the standard AWS credential chain. The provider adapter returns validated structured objects; mock mode remains the deterministic offline default.
+Set `LLM_PROVIDER` to `mock`, `openai`, `groq`, `gemini`, or `bedrock`. Credentials are read only from environment variables: `OPENAI_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, or the standard AWS credential chain. Use `LLM_PROVIDER_CHAIN=groq,gemini,openai` for explicit real-provider failover. The provider adapter returns validated structured objects; mock mode remains the deterministic offline default.
 
 ## User interface
 
@@ -175,7 +175,7 @@ The command writes metrics together with corpus version, provider, model, embedd
 | Sentence Transformer Recall@3 / Recall@5 / MRR | **1.00 / 1.00 / 0.967** | Semantic diagnostic retrieval benchmark |
 | Hybrid Recall@3 / Recall@5 / MRR | **1.00 / 1.00 / 0.975** | BM25 + Sentence Transformer diagnostic benchmark |
 
-Recorded run metadata: `run_id=d3e5feeca4a64642a577c88ba6de1d7e`, `timestamp=2026-11-20T21:27:47`, `provider=groq`, `model=openai/gpt-oss-20b`, `embedding_model=all-MiniLM-L6-v2`, `corpus_version=6ee70cfb57c96811`, `dataset_version=84ccb46bf30e54d6`, `index_version=ce391ff7c523ccae`, `prompt_version=criterion-v3`, `authoritative=true`. Retrieval labels are based on official numbered criterion-heading matches and two paraphrased queries per criterion; they are diagnostic labels, not human relevance judgments.
+Recorded run metadata: `run_id=5e7d85f38aac4b6791745894f9b21493`, `timestamp=2026-11-20T21:55:52+05:30`, `provider=groq`, `model=openai/gpt-oss-20b`, `embedding_model=all-MiniLM-L6-v2`, `corpus_version=6ee70cfb57c96811`, `dataset_version=84ccb46bf30e54d6`, `index_version=ce391ff7c523ccae`, `prompt_version=criterion-v3`, `retrieval_mode=hybrid`, `evidence_mode=hybrid`, `authoritative=true`. Retrieval labels are based on official numbered criterion-heading matches and two paraphrased queries per criterion; they are diagnostic labels, not human relevance judgments.
 
 The deterministic hashing vector search is an offline regression baseline, not a semantic embedding model. It is excluded from production retrieval and benchmark claims. Optional reranking should be reported separately from the BM25-plus-embedding baseline.
 
@@ -184,6 +184,14 @@ The deterministic hashing vector search is an offline regression baseline, not a
 - **Better retrieval:** BM25 plus Sentence Transformer hybrid retrieval, with an optional cross-encoder reranker and before/after retrieval metrics.
 - **Guardrails:** uploaded prompt-injection text is flagged as data, not instructions; malformed, empty, garbled, and scanned inputs fail explicitly.
 - **Agentic opportunities:** optional Tavily-backed public opportunity discovery for weak criteria, with privacy-preserving queries and source-linked lead output.
+
+### Final validation checkpoint
+
+- `pytest -q`: **50 passed**.
+- The latest labeled run used Groq, hybrid BM25 plus Sentence Transformer retrieval, hybrid profile evidence extraction, and the official USCIS corpus.
+- A local mock end-to-end run produced all 10 criterion records and validated structured metadata.
+- Gemini `gemini-3.5-flash-lite` was verified successfully; transient Gemini 503/timeouts and array-shaped JSON responses are handled explicitly.
+- Provider failover is configured with `LLM_PROVIDER_CHAIN`; heuristic fallback remains test-only and is never silently used in production.
 
 ### Failure Analysis
 
